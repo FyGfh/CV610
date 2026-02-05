@@ -15,7 +15,7 @@
 #include "ss_mpi_venc.h"
 #include "ss_mpi_sys_bind.h"
 
-#define DEFAULT_OUTPUT_FILE "capture.jpg"
+#define DEFAULT_OUTPUT_FILE "capture_v2.jpg"
 #define DEFAULT_WIDTH 3840
 #define DEFAULT_HEIGHT 2160
 #define DEFAULT_PIPE_ID 0
@@ -68,7 +68,7 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    printf("Camera capture program starting...\n");
+    printf("Camera capture program (Version 2 - Modified pixel format) starting...\n");
     printf("Output file: %s\n", output_file);
     printf("Resolution: %dx%d\n", width, height);
     printf("Using sensor: %d\n", g_sns_type);
@@ -76,11 +76,11 @@ int main(int argc, char *argv[]) {
     // 1. 系统初始化 - 参考官方快速启动示例
     printf("Initializing VB...\n");
     
-    // 定义 VB 参数，参考官方例程，为8MP传感器提供足够的缓冲区
+    // 定义 VB 参数，使用10位像素格式
     sample_vb_param vb_param = {
         // raw, yuv, vpss chn1
         .vb_size = {{DEFAULT_WIDTH, DEFAULT_HEIGHT}, {DEFAULT_WIDTH, DEFAULT_HEIGHT}, {720, 480}},
-        .pixel_format = {OT_PIXEL_FORMAT_RGB_BAYER_12BPP, OT_PIXEL_FORMAT_YVU_SEMIPLANAR_420,
+        .pixel_format = {OT_PIXEL_FORMAT_RGB_BAYER_10BPP, OT_PIXEL_FORMAT_YVU_SEMIPLANAR_420,
             OT_PIXEL_FORMAT_YVU_SEMIPLANAR_420},
         .compress_mode = {OT_COMPRESS_MODE_LINE, OT_COMPRESS_MODE_NONE,
             OT_COMPRESS_MODE_NONE},
@@ -136,10 +136,10 @@ int main(int argc, char *argv[]) {
     printf("MIPI info: MIPI dev %d\n", vi_cfg.mipi_info.mipi_dev);
     printf("Sensor info: SNS type %d, Bus ID %d\n", vi_cfg.sns_info.sns_type, vi_cfg.sns_info.bus_id);
     
-    // 统一VI管道配置，解决边缘偏紫色问题
-    printf("Unifying VI pipe configurations...\n");
+    // 统一VI管道配置，使用10位像素格式
+    printf("Unifying VI pipe configurations with 10-bit pixel format...\n");
     for (int i = 0; i < vi_cfg.bind_pipe.pipe_num; i++) {
-        // 确保所有管道使用相同的像素格式
+        // 确保所有管道使用10位像素格式
         vi_cfg.pipe_info[i].pipe_attr.pixel_format = OT_PIXEL_FORMAT_RGB_BAYER_10BPP;
         // 确保所有管道不绕过ISP
         vi_cfg.pipe_info[i].pipe_attr.isp_bypass = TD_FALSE;
@@ -154,7 +154,7 @@ int main(int argc, char *argv[]) {
             vi_cfg.pipe_info[i].chn_info[j].chn_attr.compress_mode = OT_COMPRESS_MODE_NONE;
         }
     }
-    printf("VI pipe configurations unified\n");
+    printf("VI pipe configurations unified with 10-bit pixel format\n");
     
     // 检查并调整MIPI相关配置
     printf("Checking and adjusting MIPI configurations...\n");
@@ -175,8 +175,6 @@ int main(int argc, char *argv[]) {
     }
     
     printf("VI started successfully\n");
-    
-    // 6. 捕获图像
     
     // 调整ISP处理参数，解决边缘偏紫色问题
     printf("Adjusting ISP parameters...\n");

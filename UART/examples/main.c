@@ -362,6 +362,8 @@ static void send_command_response(uint32_t seq_num, int result, const uint8_t *d
     
     if (mq_send_msg(g_mq_uart_to_mqtt, &resp_msg, 0) != 0) {
         perror("mq_send response");
+    } else {
+        printf("Sent command response, seq_num: %u, result: %d\n", seq_num, result);
     }
 }
 
@@ -382,7 +384,7 @@ static void handle_mqtt_commands() {
     int ret = mq_receive_msg(g_mq_mqtt_to_uart, &msg, &priority, 10);
     if (ret == 0) {
         // 成功接收到消息
-        printf("Received command from MQTT, type: %d, seq: %u\n", msg.type, msg.seq_num);
+        printf("[UART] Received command from MQTT, type: %d, seq: %u\n", msg.type, msg.seq_num);
         
         int result = 0; // 默认成功
         
@@ -519,11 +521,12 @@ static void handle_mqtt_commands() {
                     case 0x52: // HEATER控制命令 (from process_manager)
                     case 0x53: // LASER控制命令 (from process_manager)
                     case 0x54: // PWM LIGHT控制命令 (from process_manager)
-                        // 设备控制命令，包含设备ID和状态
-                        if (msg.data_len >= 3) {
-                            uint8_t device_type = msg.payload.data[0];
+                        // 设备控制命令，包含设备ID、状态和命令ID
+                        if (msg.data_len >= 4) {
+                            uint8_t device_type = msg.payload.data[0] - 0x50;  // 从命令代码提取设备类型
                             uint8_t device_id = msg.payload.data[1];
                             uint8_t state = msg.payload.data[2];
+                            uint8_t command_id = msg.payload.data[3]; // 提取命令ID
                             
                             air8000_command_t cmd;
                             switch (device_type) {
@@ -547,31 +550,37 @@ static void handle_mqtt_commands() {
                                     break;
                             }
                             
-                            // 优先处理设备控制命令
+                            // 处理设备控制命令
+                            const char *device_names[] = {"LED", "FAN", "HEATER", "LASER", "PWM LIGHT"};
+                            const char *device_name = device_type < 5 ? device_names[device_type] : "UNKNOWN";
+                            const char *state_str = state ? "ON" : "OFF";
+                            printf("[UART] 发送设备控制命令: %s (type=%d), device_id=%d, state=%s, cmd_id=%d\n", device_name, device_type, device_id, state_str, command_id);
+                            printf("[UART] 串口命令: cmd=0x%02X, dev_id=0x%02X, state=0x%02X\n", cmd, device_id, state);
                             result = air8000_device_control(g_ctx, cmd, device_id, state, DEFAULT_TIMEOUT);
-                            printf("Device control command executed, result: %d\n", result);
+                            printf("[UART] 设备控制命令执行完成, 结果: %d, cmd_id=%d\n", result, command_id);
                         } else {
                             result = -1;
+                            printf("[UART] 无效的设备命令数据长度: %d\n", msg.data_len);
                         }
                         break;
                     default:
                         // 其他命令
                         result = -1;
-                        printf("Unknown command code: 0x%02X\n", cmd_code);
+                        printf("[UART] 未知命令代码: 0x%02X\n", cmd_code);
                         break;
                 }
                 
                 if (result != 0) {
-                    printf("Failed to execute device command, result: %d\n", result);
+                    printf("[UART] 执行设备命令失败, 结果: %d\n", result);
                 } else {
-                    printf("Device command executed successfully\n");
+                    printf("[UART] 设备命令执行成功\n");
                 }
                 
                 // 发送带有数据的响应
                 send_command_response(msg.seq_num, result, resp_data, resp_len);
             } else {
                 result = -1;
-                printf("Invalid device command data length\n");
+                printf("[UART] 无效的设备命令数据长度\n");
                 send_command_response(msg.seq_num, result, NULL, 0);
             }
         } else if (msg.type == MSG_TYPE_MOTOR_CMD) {
@@ -636,16 +645,16 @@ static void handle_mqtt_commands() {
                 }
                 
                 if (result != 0) {
-                    printf("Failed to execute motor command, result: %d\n", result);
+                    printf("[UART] 执行电机命令失败, 结果: %d\n", result);
                 } else {
-                    printf("Motor command executed successfully\n");
+                    printf("[UART] 电机命令执行成功\n");
                 }
                 
                 // 发送带有数据的响应
                 send_command_response(msg.seq_num, result, resp_data, resp_len);
             } else {
                 result = -1;
-                printf("Invalid motor command data length\n");
+                printf("[UART] 无效的电机命令数据长度\n");
                 send_command_response(msg.seq_num, result, NULL, 0);
             }
         } else {
@@ -660,28 +669,28 @@ static void handle_mqtt_commands() {
                 }
                 case MSG_TYPE_FOTA_DATA: {
                     // FOTA数据 - 现在在MQTT Client中处理
-                    printf("FOTA data received, handled by MQTT Client\n");
+                    printf("[UART] 收到FOTA数据，由MQTT Client处理\n");
                     result = 0;
                     send_command_response(msg.seq_num, result, NULL, 0);
                     break;
                 }
                 case MSG_TYPE_FOTA_START: {
                     // 开始FOTA升级 - 现在在MQTT Client中处理
-                    printf("FOTA start command received, handled by MQTT Client\n");
+                    printf("[UART] 收到FOTA开始命令，由MQTT Client处理\n");
                     result = 0;
                     send_command_response(msg.seq_num, result, NULL, 0);
                     break;
                 }
                 case MSG_TYPE_FOTA_END: {
                     // FOTA数据传输结束 - 现在在MQTT Client中处理
-                    printf("FOTA end command received, handled by MQTT Client\n");
+                    printf("[UART] 收到FOTA结束命令，由MQTT Client处理\n");
                     result = 0;
                     send_command_response(msg.seq_num, result, NULL, 0);
                     break;
                 }
                 case MSG_TYPE_FOTA_COMPLETE: {
                     // FOTA完成，执行升级
-                    printf("FOTA complete command received, starting upgrade\n");
+                    printf("[UART] 收到FOTA完成命令，开始升级\n");
                     if (check_fota_file_exists()) {
                         execute_fota_upgrade();
                         result = 0;
@@ -794,110 +803,6 @@ static void __attribute__((unused)) read_sensor_data() {
     }
 }
 
-//////////////////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////////////////
-// 模拟接收UART文件数据函数已移除，使用真实的文件传输实现
-// static void simulate_uart_file_receive() {
-//     // 检查消息队列是否已初始化
-//     // if (g_mq_uart_to_mqtt == -1) {
-//     //     // 独立运行模式，不处理文件传输
-//     //     return;
-//     // }
-//     
-//     // 模拟接收到文件数据
-//     // 实际应用中，这里应该从UART读取文件数据
-//     
-//     // 示例：创建一个简单的测试文件
-//     // static const char *test_file_content = "This is a test file from UART process.\n";
-//     // static bool file_sent = false;
-//     
-//     // 只发送一次文件，避免频繁发送
-//     // if (!file_sent) {
-//     //     // 1. 发送文件信息
-//     //     message_t file_info_msg;
-//     //     memset(&file_info_msg, 0, sizeof(file_info_msg));
-//     //     
-//     //     // 设置文件信息
-//     //     file_info_msg.type = MSG_TYPE_FILE_INFO;
-//     //     file_info_msg.seq_num = g_seq_num++;
-//     //     file_info_msg.timestamp = (uint32_t)time(NULL);
-//     //     
-//     //     // 填充文件传输元数据
-//     //     file_transfer_metadata_t *meta = &file_info_msg.payload.file_meta;
-//     //     meta->file_id = 1; // 生成唯一文件ID
-//     //     meta->file_size = strlen(test_file_content);
-//     //     meta->total_chunks = 1; // 只有一个分片
-//     //     meta->current_chunk = 0;
-//     //     meta->chunk_size = strlen(test_file_content);
-//     //     meta->chunk_offset = 0;
-//     //     strncpy(meta->filename, "test.txt", sizeof(meta->filename) - 1);
-//     //     
-//     //     file_info_msg.data_len = sizeof(file_transfer_metadata_t);
-//     //     
-//     //     // 发送文件信息到MQTT进程
-//     //     if (mq_send_msg(g_mq_uart_to_mqtt, &file_info_msg, 0) != 0) {
-//     //         perror("mq_send file info");
-//     //         return;
-//     //     }
-//     //     
-//     //     // 2. 发送文件开始通知
-//     //     message_t start_msg;
-//     //     memset(&start_msg, 0, sizeof(start_msg));
-//     //     start_msg.type = MSG_TYPE_FILE_START;
-//     //     start_msg.seq_num = g_seq_num++;
-//     //     start_msg.timestamp = (uint32_t)time(NULL);
-//     //     
-//     //     if (mq_send_msg(g_mq_uart_to_mqtt, &start_msg, 0) != 0) {
-//     //         perror("mq_send file start");
-//     //         return;
-//     //     }
-//     //     
-//     //     // 3. 发送文件数据
-//     //     message_t data_msg;
-//     //     memset(&data_msg, 0, sizeof(data_msg));
-//     //     
-//     //     // 设置消息基本信息
-//     //     data_msg.type = MSG_TYPE_FILE_DATA;
-//     //     data_msg.seq_num = g_seq_num++;
-//     //     data_msg.timestamp = (uint32_t)time(NULL);
-//     //     data_msg.data_len = strlen(test_file_content);
-//     //     memcpy(data_msg.payload.data, test_file_content, data_msg.data_len);
-//     //     
-//     //     // 发送文件数据到MQTT进程
-//     //     if (mq_send_msg(g_mq_uart_to_mqtt, &data_msg, 0) != 0) {
-//     //         perror("mq_send file data");
-//     //         return;
-//     //     }
-//     //     
-//     //     // 4. 发送文件结束通知
-//     //     message_t end_msg;
-//     //     memset(&end_msg, 0, sizeof(end_msg));
-//     //     end_msg.type = MSG_TYPE_FILE_END;
-//     //     end_msg.seq_num = g_seq_num++;
-//     //     end_msg.timestamp = (uint32_t)time(NULL);
-//     //     
-//     //     if (mq_send_msg(g_mq_uart_to_mqtt, &end_msg, 0) != 0) {
-//     //         perror("mq_send file end");
-//     //         return;
-//     //     }
-//     //     
-//     //     // 5. 发送文件完成通知
-//     //     message_t complete_msg;
-//     //     memset(&complete_msg, 0, sizeof(complete_msg));
-//     //     complete_msg.type = MSG_TYPE_FILE_COMPLETE;
-//     //     complete_msg.seq_num = g_seq_num++;
-//     //     complete_msg.timestamp = (uint32_t)time(NULL);
-//     //     complete_msg.data_len = 0;
-//     //     
-//     //     if (mq_send_msg(g_mq_uart_to_mqtt, &complete_msg, 0) != 0) {
-//     //         perror("mq_send file complete");
-//     //         return;
-//     //     }
-//     //     
-//     //     file_sent = true;
-//     // }
-// }
 
 /**
  * @brief 主函数，程序入口点
@@ -995,8 +900,7 @@ int main(int argc, char **argv) {
         
         // 每5秒读取一次传感器数据
         if (sensor_read_count % 50 == 0) {
-            // read_sensor_data();
-            // simulate_uart_file_receive(); // 模拟接收文件数据
+            read_sensor_data();
         }
         
         sensor_read_count++;

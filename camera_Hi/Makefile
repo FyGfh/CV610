@@ -59,34 +59,59 @@ LDFLAGS += -Wl,--start-group $(STATIC_LIBS) -Wl,--end-group
 LDFLAGS += -lpthread -lm -ldl
 
 # Source files
-SRCS := camera_capture_hi3516.c
-SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_sys.c
-SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_vi.c
-SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_isp.c
-SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_venc.c
-SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_region.c
-SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_vpss.c
-SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_osd_drawline.c
-SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/loadbmp.c
+# 公共源文件
+COMMON_SRCS := $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_sys.c
+COMMON_SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_vi.c
+COMMON_SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_isp.c
+COMMON_SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_venc.c
+COMMON_SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_region.c
+COMMON_SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_vpss.c
+COMMON_SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/sample_comm_osd_drawline.c
+COMMON_SRCS += $(SDK_PATH)/smp/a7_linux/source/mpp/sample/common/loadbmp.c
+
+# 版本源文件
+V1_SRCS := camera_capture_hi3516_v1.c
+V2_SRCS := camera_capture_hi3516_v2.c
+V3_SRCS := camera_capture_hi3516_v3.c
+V4_SRCS := camera_capture_hi3516_v4.c
 
 # Object files
-OBJS := $(SRCS:.c=.o)
+COMMON_OBJS := $(COMMON_SRCS:.c=.o)
+V1_OBJS := $(V1_SRCS:.c=.o) $(COMMON_OBJS)
+V2_OBJS := $(V2_SRCS:.c=.o) $(COMMON_OBJS)
+V3_OBJS := $(V3_SRCS:.c=.o) $(COMMON_OBJS)
+V4_OBJS := $(V4_SRCS:.c=.o) $(COMMON_OBJS)
 
-# Target
-TARGET := camera_capture_hi3516
+# Targets
+TARGETS := camera_capture_hi3516_v1 camera_capture_hi3516_v2 camera_capture_hi3516_v3 camera_capture_hi3516_v4
 
 # Rules
-all: $(TARGET)
+all: $(TARGETS)
 
-$(TARGET): $(OBJS)
+# Version 1: Original version
+camera_capture_hi3516_v1: $(V1_OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+# Version 2: Modified pixel format
+camera_capture_hi3516_v2: $(V2_OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+# Version 3: Modified ISP parameters
+camera_capture_hi3516_v3: $(V3_OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+# Version 4: Modified MIPI configuration
+camera_capture_hi3516_v4: $(V4_OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(COMMON_OBJS) $(V1_OBJS) $(V2_OBJS) $(V3_OBJS) $(V4_OBJS)
+	rm -f $(TARGETS)
 	rm -f snap_*.jpg
 	rm -f *.log
+	rm -f capture*.jpg
 
 .PHONY: all clean

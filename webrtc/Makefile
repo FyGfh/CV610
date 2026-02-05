@@ -13,16 +13,20 @@ AR  := $(CROSS_COMPILE)ar
 TARGET = webrtc_h264_stream
 
 # ==================== 目录设置 ====================
-SRC_DIR = src
-INCLUDE_DIR = include
+SRC_DIR = .
+INCLUDE_DIR = .
 HTML_DIR = html
 
 # ==================== SDK 路径设置 ====================
 SDK_PATH = ../../Hi3516CV610_SDK_V1.0.2.0
 
-SDK_INCLUDE = $(SDK_PATH)/package/smp/a7_linux/source/out/include
-SDK_CBB_INCLUDE = $(SDK_PATH)/package/smp/a7_linux/source/mpp/cbb
-SDK_PLATFORM_INCLUDE = $(SDK_PATH)/package/platform/securec/include
+SDK_INCLUDE = $(SDK_PATH)/smp/a7_linux/source/out/include
+SDK_CBB_INCLUDE = $(SDK_PATH)/smp/a7_linux/source/mpp/cbb
+SDK_PLATFORM_INCLUDE = $(SDK_PATH)/platform/securec/include
+
+# 验证SDK路径是否存在
+$(if $(wildcard $(SDK_INCLUDE)/ot_type.h),,$(error SDK路径错误: 找不到 $(SDK_INCLUDE)/ot_type.h))
+$(if $(wildcard $(SDK_PLATFORM_INCLUDE)/securec.h),,$(error SDK路径错误: 找不到 $(SDK_PLATFORM_INCLUDE)/securec.h))
 
 # ==================== 源文件 ====================
 # 单文件实现，无需其他源文件
@@ -39,7 +43,10 @@ ENABLE_GSTREAMER ?= 0
 
 CFLAGS = -Wall -Wextra -g -O2 \
          $(INCS) \
-         -fPIC
+         -fPIC \
+         -DSENSOR0_TYPE=IMX415_MIPI_8M_25FPS_10BIT \
+         -DSENSOR1_TYPE=IMX415_MIPI_8M_25FPS_10BIT \
+         -DIMX415_MIPI_8M_25FPS_10BIT_SELECT=y
 
 ifeq ($(ENABLE_GSTREAMER),1)
     CFLAGS += -DENABLE_GSTREAMER
@@ -48,24 +55,28 @@ endif
 # ==================== 链接选项 ====================
 LDFLAGS = -static -lpthread -lm
 
-SDK_LIBS = -L$(SDK_PATH)/package/smp/a7_linux/source/out/lib \
-           -lss_mpi_venc \
-           -lss_mpi_vi \
-           -lss_mpi_vpss \
-           -lss_mpi_vb \
-           -lss_mpi_sys \
-           -lss_mpi_region \
+SDK_LIBS = -L$(SDK_PATH)/smp/a7_linux/source/out/lib \
+           -lss_mpi \
+           -lot_osal \
+           -lss_mpi_sysbind \
+           -lss_mpi_sysmem \
+           -lsecurec \
            -lss_mpi_isp \
-           -lss_mpi_sys_bind \
-           -lot_common \
-           -lot_venc \
-           -lot_vi \
-           -lot_vpss \
-           -lot_vb \
-           -lot_sys \
-           -lot_region \
-           -lot_isp \
-           -lsecurec
+           -lss_mpi_ae \
+           -lss_mpi_awb \
+           -lot_mpi_isp \
+           -lextend_stats \
+           -laiisp \
+           -lcalcflicker \
+           -lir_auto \
+           -ldehaze \
+           -lldci \
+           -lacs \
+           -lbnr \
+           -ldrc \
+           -ldnvqe \
+           -lsns_imx415 \
+           -lss_mpi
 
 ifeq ($(ENABLE_GSTREAMER),1)
     LDFLAGS += -lgstreamer-1.0 \

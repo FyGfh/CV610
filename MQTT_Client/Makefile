@@ -18,6 +18,12 @@ OPENSSL_INCLUDE := ../../openssl-3.0.13/cross-openssl/include
 # OpenSSL库文件路径（相对路径）
 OPENSSL_LIB := ../../openssl-3.0.13/cross-openssl/lib
 
+# ------------------- cJSON 配置 -------------------
+# cJSON头文件路径（相对路径）
+CJSON_INCLUDE := ../../cJSON-1.7.15/install/include/cjson
+# cJSON静态库路径（相对路径）
+CJSON_STATIC_LIB := ../../cJSON-1.7.15/install/lib/libcjson.a
+
 # ------------------- 编译选项 -------------------
 CFLAGS = \
   -Wall -Wextra \
@@ -25,6 +31,7 @@ CFLAGS = \
   -I../process_manager/include \
   -I$(MOSQ_INCLUDE) \
   -I$(OPENSSL_INCLUDE) \
+  -I$(CJSON_INCLUDE) \
   -g -O2 \
   -mcpu=cortex-a7
 
@@ -32,13 +39,14 @@ CFLAGS = \
 LDFLAGS = \
   -static \
   $(MOSQ_STATIC_LIB) \
+  $(CJSON_STATIC_LIB) \
   -L$(OPENSSL_LIB) \
   -lpthread \
   -lssl \
   -lcrypto
 
 # ------------------- 源文件定义 -------------------
-SRC_MQTT_CLIENT = src/mqtt_client.c src/mqtt_fota.c
+SRC_MQTT_CLIENT = src/mqtt_client.c src/fota_file_download.c src/mqtt_file_upload.c
 SRC_PROCESS_MANAGER = ../process_manager/src/message_queue.c
 OBJ_MQTT_CLIENT = $(SRC_MQTT_CLIENT:.c=.o) $(SRC_PROCESS_MANAGER:.c=.o)
 

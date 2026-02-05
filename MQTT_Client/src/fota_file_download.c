@@ -1,4 +1,4 @@
-#include "mqtt_fota.h"
+#include "fota_file_download.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <dirent.h>
+#include <openssl/evp.h>
 
 // ==================== 内部函数声明 ====================
 
@@ -24,7 +25,7 @@ static void trigger_fota_callback(fota_context_t *ctx, fota_state_t state, fota_
 /**
  * @brief 验证文件校验和
  */
-static bool verify_file_checksum(const char *file_path, uint32_t expected_checksum);
+static bool verify_file_checksum(const char *file_path, const char *expected_checksum);
 
 /**
  * @brief 尝试创建目录（带重试）
@@ -76,7 +77,7 @@ fota_context_t *fota_create(const char *file_path, const char *dir_path, fota_ca
     ctx->total_chunks = 0;
     ctx->progress = 0;
     ctx->aborted = false;
-    ctx->checksum = 0;
+    memset(ctx->checksum, 0, sizeof(ctx->checksum));
 
     return ctx;
 }
@@ -226,7 +227,7 @@ bool fota_process_chunk(fota_context_t *ctx, uint32_t chunk_id, const uint8_t *d
     return true;
 }
 
-bool fota_finish(fota_context_t *ctx, uint32_t checksum) {
+bool fota_finish(fota_context_t *ctx, const char *checksum) {
     if (!ctx) {
         return false;
     }
@@ -266,7 +267,7 @@ bool fota_finish(fota_context_t *ctx, uint32_t checksum) {
         return false;
     }
 
-    ctx->checksum = checksum;
+    strncpy(ctx->checksum, checksum, sizeof(ctx->checksum) - 1);
 
     // 更新状态
     update_fota_state(ctx, FOTA_STATE_SAVED, FOTA_ERR_NONE);
@@ -362,28 +363,43 @@ static void trigger_fota_callback(fota_context_t *ctx, fota_state_t state, fota_
 }
 
 /**
- * @brief 验证文件校验和
+ * @brief 验证文件校验和 (SHA256)
  */
-static bool verify_file_checksum(const char *file_path, uint32_t expected_checksum) {
+static bool verify_file_checksum(const char *file_path, const char *expected_checksum) {
+    if (!file_path || !expected_checksum) {
+        return false;
+    }
+
     FILE *file = fopen(file_path, "rb");
     if (!file) {
         return false;
     }
     
-    uint32_t calculated_checksum = 0;
-    uint8_t buffer[4096];
+    EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+    const EVP_MD *md = EVP_sha256();
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int hash_len;
+
+    EVP_DigestInit_ex(mdctx, md, NULL);
+
+    unsigned char buffer[4096];
     size_t bytes_read;
-    
     while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0) {
-        calculated_checksum = (calculated_checksum << 5) - calculated_checksum;
-        for (size_t i = 0; i < bytes_read; i++) {
-            calculated_checksum += buffer[i];
-        }
+        EVP_DigestUpdate(mdctx, buffer, bytes_read);
     }
-    
+
+    EVP_DigestFinal_ex(mdctx, hash, &hash_len);
+    EVP_MD_CTX_free(mdctx);
     fclose(file);
     
-    return calculated_checksum == expected_checksum;
+    // Convert to hex string
+    char calculated_checksum[65] = {0};
+    for (unsigned int i = 0; i < hash_len; i++) {
+        sprintf(calculated_checksum + i * 2, "%02x", hash[i]);
+    }
+    
+    // Case-insensitive comparison
+    return strcasecmp(calculated_checksum, expected_checksum) == 0;
 }
 
 static bool try_create_directory(const char *dir_path, int max_retries) {
@@ -441,216 +457,5 @@ static FILE *try_open_file(const char *file_path, const char *mode, int max_retr
     return NULL;
 }
 
-// ==================== 文件分片上传相关实现 ====================
 
-/**
- * @brief 生成唯一文件ID
- */
-static void generate_file_id(char *buffer, size_t buffer_size) {
-    time_t now = time(NULL);
-    snprintf(buffer, buffer_size, "%lld_%d", (long long)now, rand() % 10000);
-}
 
-/**
- * @brief 从文件路径中提取文件名
- */
-static void extract_filename(const char *file_path, char *filename, size_t filename_size) {
-    const char *last_slash = strrchr(file_path, '/');
-    if (last_slash) {
-        strncpy(filename, last_slash + 1, filename_size - 1);
-    } else {
-        strncpy(filename, file_path, filename_size - 1);
-    }
-    filename[filename_size - 1] = '\0';
-}
-
-fota_upload_context_t *fota_upload_create(const char *file_path, uint32_t chunk_size) {
-    if (!file_path) {
-        return NULL;
-    }
-
-    // 检查文件是否存在
-    struct stat file_stat;
-    if (stat(file_path, &file_stat) != 0) {
-        return NULL;
-    }
-
-    // 分配上传上下文
-    fota_upload_context_t *ctx = (fota_upload_context_t *)malloc(sizeof(fota_upload_context_t));
-    if (!ctx) {
-        return NULL;
-    }
-
-    // 初始化上下文
-    memset(ctx, 0, sizeof(fota_upload_context_t));
-    strncpy(ctx->file_path, file_path, sizeof(ctx->file_path) - 1);
-    generate_file_id(ctx->file_id, sizeof(ctx->file_id));
-    extract_filename(file_path, ctx->filename, sizeof(ctx->filename));
-    
-    ctx->file_size = file_stat.st_size;
-    ctx->chunk_size = chunk_size ? chunk_size : 16384; // 默认16KB
-    ctx->total_chunks = (ctx->file_size + ctx->chunk_size - 1) / ctx->chunk_size;
-    ctx->state = FOTA_STATE_IDLE;
-    ctx->error = FOTA_ERR_NONE;
-    ctx->progress = 0;
-    ctx->aborted = false;
-
-    return ctx;
-}
-
-void fota_upload_destroy(fota_upload_context_t *ctx) {
-    if (!ctx) {
-        return;
-    }
-
-    // 关闭文件
-    if (ctx->file_handle) {
-        fclose(ctx->file_handle);
-        ctx->file_handle = NULL;
-    }
-
-    // 释放内存
-    free(ctx);
-}
-
-bool fota_upload_start(fota_upload_context_t *ctx) {
-    if (!ctx || ctx->state != FOTA_STATE_IDLE) {
-        return false;
-    }
-
-    // 打开文件
-    ctx->file_handle = try_open_file(ctx->file_path, "rb", FOTA_MAX_RETRY_COUNT);
-    if (!ctx->file_handle) {
-        ctx->error = FOTA_ERR_FILE;
-        ctx->state = FOTA_STATE_FAILED;
-        return false;
-    }
-
-    // 更新状态
-    ctx->state = FOTA_STATE_RECEIVING; // 使用相同的状态表示进行中
-    ctx->current_chunk = 0;
-    ctx->uploaded_size = 0;
-    ctx->progress = 0;
-
-    return true;
-}
-
-bool fota_upload_get_next_chunk(fota_upload_context_t *ctx, uint8_t **chunk_data, size_t *chunk_data_len, uint32_t *chunk_id) {
-    if (!ctx || !chunk_data || !chunk_data_len || !chunk_id) {
-        return false;
-    }
-
-    if (ctx->state != FOTA_STATE_RECEIVING) {
-        return false;
-    }
-
-    if (ctx->current_chunk >= ctx->total_chunks) {
-        return false;
-    }
-
-    // 计算当前分片大小
-    size_t current_chunk_size = ctx->chunk_size;
-    if (ctx->current_chunk == ctx->total_chunks - 1) {
-        current_chunk_size = ctx->file_size - (ctx->total_chunks - 1) * ctx->chunk_size;
-    }
-
-    // 分配分片数据内存
-    uint8_t *data = (uint8_t *)malloc(current_chunk_size);
-    if (!data) {
-        ctx->error = FOTA_ERR_NOMEM;
-        ctx->state = FOTA_STATE_FAILED;
-        return false;
-    }
-
-    // 读取分片数据
-    size_t read_size = fread(data, 1, current_chunk_size, ctx->file_handle);
-    if (read_size != current_chunk_size) {
-        free(data);
-        ctx->error = FOTA_ERR_FILE;
-        ctx->state = FOTA_STATE_FAILED;
-        return false;
-    }
-
-    // 更新状态
-    *chunk_data = data;
-    *chunk_data_len = read_size;
-    *chunk_id = ctx->current_chunk;
-
-    ctx->current_chunk++;
-    ctx->uploaded_size += read_size;
-    ctx->progress = (uint8_t)((ctx->uploaded_size * 100) / ctx->file_size);
-
-    return true;
-}
-
-bool fota_upload_finish(fota_upload_context_t *ctx) {
-    if (!ctx) {
-        return false;
-    }
-
-    // 关闭文件
-    if (ctx->file_handle) {
-        fclose(ctx->file_handle);
-        ctx->file_handle = NULL;
-    }
-
-    // 更新状态
-    ctx->state = FOTA_STATE_SAVED;
-
-    return true;
-}
-
-bool fota_upload_abort(fota_upload_context_t *ctx) {
-    if (!ctx) {
-        return false;
-    }
-
-    // 标记为已取消
-    ctx->aborted = true;
-
-    // 关闭文件
-    if (ctx->file_handle) {
-        fclose(ctx->file_handle);
-        ctx->file_handle = NULL;
-    }
-
-    // 更新状态
-    ctx->state = FOTA_STATE_FAILED;
-
-    return true;
-}
-
-fota_state_t fota_upload_get_state(fota_upload_context_t *ctx) {
-    if (!ctx) {
-        return FOTA_STATE_IDLE;
-    }
-    return ctx->state;
-}
-
-uint8_t fota_upload_get_progress(fota_upload_context_t *ctx) {
-    if (!ctx) {
-        return 0;
-    }
-    return ctx->progress;
-}
-
-fota_error_t fota_upload_get_error(fota_upload_context_t *ctx) {
-    if (!ctx) {
-        return FOTA_ERR_OTHER;
-    }
-    return ctx->error;
-}
-
-uint64_t fota_upload_get_file_size(fota_upload_context_t *ctx) {
-    if (!ctx) {
-        return 0;
-    }
-    return ctx->file_size;
-}
-
-uint32_t fota_upload_get_total_chunks(fota_upload_context_t *ctx) {
-    if (!ctx) {
-        return 0;
-    }
-    return ctx->total_chunks;
-}

@@ -1,5 +1,5 @@
-#ifndef MQTT_FOTA_H
-#define MQTT_FOTA_H
+#ifndef FOTA_FILE_DOWNLOAD_H
+#define FOTA_FILE_DOWNLOAD_H
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -86,7 +86,7 @@ typedef struct fota_context_t {
     fota_error_t error;         // 错误码
     uint8_t progress;           // 进度百分比（0-100）
     bool aborted;               // 是否被取消
-    uint32_t checksum;          // 文件校验和
+    char checksum[65];          // 文件校验和 (SHA256 string)
     fota_callback_t callback;   // 回调函数
     void *user_data;            // 用户数据
 } fota_context_t;
@@ -131,10 +131,10 @@ bool fota_process_chunk(fota_context_t *ctx, uint32_t chunk_id, const uint8_t *d
 /**
  * @brief 结束FOTA接收
  * @param ctx FOTA上下文指针
- * @param checksum 文件校验和
+ * @param checksum 文件校验和 (SHA256 string)
  * @return 成功返回true，失败返回false
  */
-bool fota_finish(fota_context_t *ctx, uint32_t checksum);
+bool fota_finish(fota_context_t *ctx, const char *checksum);
 
 /**
  * @brief 取消FOTA接收
@@ -179,105 +179,4 @@ bool fota_check_disk_space(const char *path, uint64_t required_size);
  */
 bool fota_ensure_directory(const char *dir_path);
 
-// ==================== 文件分片上传相关 ====================
-
-/**
- * @brief 文件分片上传上下文结构
- */
-typedef struct {
-    char file_path[1024];      // 待上传文件路径
-    char file_id[64];          // 文件唯一标识
-    char filename[256];        // 文件名
-    FILE *file_handle;          // 文件句柄
-    uint64_t file_size;         // 文件总大小
-    uint64_t uploaded_size;     // 已上传大小
-    uint32_t current_chunk;     // 当前分片编号
-    uint32_t total_chunks;      // 总分片数
-    uint32_t chunk_size;        // 分片大小
-    fota_state_t state;         // 当前状态
-    fota_error_t error;         // 错误码
-    uint8_t progress;           // 进度百分比（0-100）
-    bool aborted;               // 是否被取消
-} fota_upload_context_t;
-
-/**
- * @brief 创建文件分片上传上下文
- * @param file_path 待上传文件路径
- * @param chunk_size 分片大小（默认16KB）
- * @return 上传上下文指针，失败返回NULL
- */
-fota_upload_context_t *fota_upload_create(const char *file_path, uint32_t chunk_size);
-
-/**
- * @brief 销毁文件分片上传上下文
- * @param ctx 上传上下文指针
- */
-void fota_upload_destroy(fota_upload_context_t *ctx);
-
-/**
- * @brief 开始文件分片上传
- * @param ctx 上传上下文指针
- * @return 成功返回true，失败返回false
- */
-bool fota_upload_start(fota_upload_context_t *ctx);
-
-/**
- * @brief 获取下一个文件分片
- * @param ctx 上传上下文指针
- * @param chunk_data 输出参数，用于存储分片数据
- * @param chunk_data_len 输出参数，用于存储分片数据长度
- * @param chunk_id 输出参数，用于存储分片编号
- * @return 成功返回true，失败返回false
- */
-bool fota_upload_get_next_chunk(fota_upload_context_t *ctx, uint8_t **chunk_data, size_t *chunk_data_len, uint32_t *chunk_id);
-
-/**
- * @brief 完成文件分片上传
- * @param ctx 上传上下文指针
- * @return 成功返回true，失败返回false
- */
-bool fota_upload_finish(fota_upload_context_t *ctx);
-
-/**
- * @brief 取消文件分片上传
- * @param ctx 上传上下文指针
- * @return 成功返回true，失败返回false
- */
-bool fota_upload_abort(fota_upload_context_t *ctx);
-
-/**
- * @brief 获取文件上传状态
- * @param ctx 上传上下文指针
- * @return 上传状态
- */
-fota_state_t fota_upload_get_state(fota_upload_context_t *ctx);
-
-/**
- * @brief 获取文件上传进度
- * @param ctx 上传上下文指针
- * @return 进度百分比（0-100）
- */
-uint8_t fota_upload_get_progress(fota_upload_context_t *ctx);
-
-/**
- * @brief 获取文件上传错误码
- * @param ctx 上传上下文指针
- * @return 错误码
- */
-fota_error_t fota_upload_get_error(fota_upload_context_t *ctx);
-
-/**
- * @brief 获取文件总大小
- * @param ctx 上传上下文指针
- * @return 文件总大小
- */
-uint64_t fota_upload_get_file_size(fota_upload_context_t *ctx);
-
-/**
- * @brief 获取总分片数
- * @param ctx 上传上下文指针
- * @return 总分片数
- */
-uint32_t fota_upload_get_total_chunks(fota_upload_context_t *ctx);
-
-#endif // MQTT_FOTA_H
+#endif // FOTA_FILE_DOWNLOAD_H
